@@ -1,0 +1,80 @@
+FROM tonychangcsp/greta:R
+
+LABEL org.label-schema.license="CSP-1.0" \
+	org.label-schema.vcs-url="https://gitlab.com/tonychang" \
+	org.label-schema.vendor="Conservation Science Partners" \
+	maintainer="Tony Chang <tony@csp-inc.org>"
+   
+RUN apt-get update && apt-get install -y git libegl1-mesa libxcursor-dev libxkbcommon-x11-0 psmisc sudo libclang-dev texinfo texlive-extra-utils texlive-fonts-recommended texlive-fonts-extra texlive-latex-recommended gdebi-core libapparmor1 cron
+
+#install RStudio
+RUN printf '\nexport QT_STYLE_OVERRIDE=gtk\n' | tee -a ~/.profile 
+
+RUN update-locale
+#old file location https://download2.rstudio.org/rstudio-server-1.1.456-amd64.deb
+RUN wget  https://download2.rstudio.org/server/bionic/amd64/rstudio-server-1.2.1335-amd64.deb \
+                                              && gdebi -n rstudio-server-1.2.1335-amd64.deb 
+
+RUN ln -s /usr/lib/rstudio-server/bin/pandoc/pandoc /usr/local/bin \
+  && ln -s /usr/lib/rstudio-server/bin/pandoc/pandoc-citeproc /usr/local/bin \
+  && git clone https://github.com/jgm/pandoc-templates \
+  && mkdir -p /opt/pandoc/templates \
+  && cp -r pandoc-templates*/* /opt/pandoc/templates && rm -rf pandoc-templates* \
+  && mkdir /root/.pandoc && ln -s /opt/pandoc/templates /root/.pandoc/templates \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/ \
+  && mkdir -p /usr/local/lib/R/etc \
+  ## RStudio wants an /etc/R, will populate from $R_HOME/etc
+  && mkdir -p /etc/R \
+  ## Write config files in $R_HOME/etc
+  && echo '\n\
+    \n# Configure httr to perform out-of-band authentication if HTTR_LOCALHOST \
+    \n# is not set since a redirect to localhost may not work depending upon \
+    \n# where this Docker container is running. \
+    \nif(is.na(Sys.getenv("HTTR_LOCALHOST", unset=NA))) { \
+    \n  options(httr_oob_default = TRUE) \
+    \n}' >> /usr/local/lib/R/etc/Rprofile.site \
+  && echo "PATH=${PATH}" >> /usr/local/lib/R/etc/Renviron \
+  ## Prevent rstudio from deciding to use /usr/bin/R if a user apt-get installs a package
+  &&  echo 'rsession-which-r=/usr/local/bin/R' >> /etc/rstudio/rserver.conf \
+  ## use more robust file locking to avoid errors when using shared volumes:
+  && echo 'lock-type=advisory' >> /etc/rstudio/file-locks \
+  ## configure git not to request password each time
+  && git config --system credential.helper 'cache --timeout=3600' \
+  && git config --system push.default simple \
+  ## Set up S6 init system
+  && wget -P /tmp/ https://github.com/just-containers/s6-overlay/releases/download/v1.11.0.1/s6-overlay-amd64.tar.gz \
+  && tar xzf /tmp/s6-overlay-amd64.tar.gz -C / \
+  && mkdir -p /etc/services.d/rstudio \
+
+ENV PATH=/usr/lib/rstudio-server/bin:$PATH
+
+RUN echo '#!/usr/bin/with-contenv bash \
+           \n exec /usr/lib/rstudio-server/bin/rserver --server-daemonize 0' \
+           > /etc/services.d/rstudio/run \
+   && echo '#!/bin/bash \
+           \n rstudio-server stop' \
+           > /etc/services.d/rstudio/finish
+
+RUN wget https://github.com/rocker-org/rocker-versioned/blob/master/rstudio/userconf.sh 
+RUN cp userconf.sh /etc/cont-init.d/userconf
+
+RUN wget https://github.com/rocker-org/rocker-versioned/blob/master/rstudio/pam-helper.sh 
+RUN cp pam-helper.sh /usr/lib/rstudio-server/bin/pam-helper
+
+## running with "-e ADD=shiny" adds shiny server
+#COPY add_shiny.sh /etc/cont-init.d/add
+
+RUN ln /usr/bin/R /usr/local/bin/R
+
+EXPOSE 8787
+
+## Need to configure non-root user for RStudio
+RUN useradd rstudio \
+  && echo "rstudio:rstudio" | chpasswd \
+	&& mkdir /home/rstudio \
+	&& chown rstudio:rstudio /home/rstudio \
+	&& addgroup rstudio staff
+
+CMD ["/usr/lib/rstudio-server/bin/rserver", "--server-daemonize=0", "--server-app-armor-enabled=0"]
+

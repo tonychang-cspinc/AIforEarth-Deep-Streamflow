@@ -1,0 +1,43 @@
+FROM ubuntu:18.04
+
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+
+RUN apt-get update \
+    && apt-get install -y libgdal-dev \
+        python3-pip \
+        python3-dev \
+        git \
+        gdal-bin \
+        python3-gdal \
+        python2.7-dev \
+        python2.7-setuptools \
+        libspatialindex-dev \
+    && cd /usr/local/bin \
+    && ln -s /usr/bin/python3 python \
+    && apt-get autoremove \
+    && rm -rf /var/lib/apt /var/cache/apt
+
+RUN pip3 install --upgrade pip
+RUN pip3 install shapely \
+    dask \
+    geopandas \
+    rasterio \
+    rasterstats \
+    descartes \
+    pygeoprocessing \
+    numpy \
+    gdal \
+    folium \
+    fiona \
+    pandas \
+    pyyaml \
+    matplotlib \
+    pscript \
+    shapely \
+    scikit-image \
+    scipy \
+    sklearn \
+    && rm -rf /.cache/pip
+
+CMD /bin/bash
